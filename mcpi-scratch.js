@@ -1,10 +1,6 @@
 (function (ext) {
-    // Cleanup function when the extension is unloaded
-    ext._shutdown = function() {};
 
-    ext._getStatus = function() {
-        return { status:2, msg:'Ready' };
-    };
+    var blockHits = false;
 
     ext.postToChat = function(str) {
         var cmdUrl = "http://localhost:4715/postToChat/" + encodeURIComponent(str);
@@ -114,25 +110,177 @@
         }); // nb: GET is including the javascript callback. Do I need this for one-way call?
     };
 
+    // get one coord (x, y, or z) for playerPos
+    ext.getPlayerPos = function(posCoord, callback) {
+        var cmdUrl = "http://localhost:4715/getPlayerPos/" + posCoord;
+        $.ajax({
+            type: "GET",
+            url: cmdUrl,
+            //dataType: "jsonp", // hack for the not origin problem - replace with CORS based solution
+            success: function(data) {
+                console.log("getPlayerPos success ", data.trim());
+                callback(data.trim());
+            },
+            error: function(jqxhr, textStatus, error) { // have to change this coz jasonp parse error
+                console.log("Error getPlayerPos: ", error);
+                callback(null);
+            }
+        }); 
+    };
+
+    // get block.id or block.data
+    ext.getBlock = function(blockData, x, y, z, posType, callback) {
+        var cmdUrl = "http://localhost:4715/getBlock/" + blockData + "/" + x + "/" + y + "/" + z + "/" + posType;
+        $.ajax({
+            type: "GET",
+            url: cmdUrl,
+            //dataType: "jsonp", // hack for the not origin problem - replace with CORS based solution
+            success: function(data) {
+                console.log("getBlock success ", data.trim());
+                callback(data.trim());
+            },
+            error: function(jqxhr, textStatus, error) { // have to change this coz jasonp parse error
+                console.log("Error getBlock: ", error);
+                callback(null);
+            }
+        }); 
+    };
+
+    function checkMC_Events() {
+        var cmdUrl = "http://localhost:4715/pollBlockHit/";
+        $.ajax({
+            type: "GET",
+            url: cmdUrl,
+            //dataType: "jsonp", // hack for the not origin problem - replace with CORS based solution
+            success: function(data) {
+                console.log("checkMC_Events success ", data.trim());
+                if (parseInt(data) == 1)
+                    blockHits = true;
+                else
+                    blockHits = false;
+            },
+            error: function(jqxhr, textStatus, error) { // have to change this coz jasonp parse error
+                console.log("Error checkMC_Events: ", error);
+                callback(null);
+            }
+        }); 
+    };
+
+    ext.whenBlockHit = function(str) {
+        if (!blockHits)
+            return;
+        else
+            return true;
+    };
+
+
+    ext._getStatus = function() {
+        return { status:2, msg:'Ready' };
+    };
+
+    ext._shutdown = function() {
+        if (poller) {
+          clearInterval(poller);
+          poller = null;
+        }
+    };
+
+
+    var TRANSLATIONS = {
+        en: {
+            postToChat: 'post to chat %s',
+            playerPosToChat: "post Player.pos chat",
+            setPlayerPos: "set Player pos to x:%n y:%n z:%n",
+            setBlock: "set block pos x:%n y:%n z:%n to type %n data %n %m.blockPos",
+            setBlocks: "set blocks pos x1:%n y1:%n z1:%n to x2:%n y2:%n z2:%n to type %n data %n",
+            setLine: "set line pos x1:%n z1:%n to x2:%n z2:%n height y:%n to type %n data %n",
+            setCircle: "set circle center x1:%n z1:%n radius r:%n at height y:%n to type %n data %n",
+            getPlayerPos:"get player pos %m.pos",
+            getBlock:"get block %m.blockData pos x:%n y:%n z:%n %m.blockPos", 
+            whenBlockHit: "when blockHit",
+            message:"message"
+        },
+        pt: {
+            postToChat: "escreve no chat %s",
+            playerPosToChat: "escreve posição do jogador no chat",
+            setPlayerPos: "muda a pos do Jogador para x:%n y:%n z:%n",
+            setBlock: "muda o bloco na pos x:%n y:%n z:%n para o tipo %n subtipo %n %m.blockPos",
+            setBlocks: "coloca blocos da pos x1:%n y1:%n z1:%n até x2:%n y2:%n z2:%n do tipo %n subtipo %n",
+            setLine: "desenha linha da pos x1:%n z1:%n até x2:%n z2:%n à altura de y:%n com blocos tipo %n subtipo %n",
+            setCircle: "desenha circulo com centro x1:%n z1:%n, raio r:%n à altura y:%n com blocos tipo %n subtipo %n",
+            getPlayerPos:"posição do Jogador no eixo do %m.pos",
+            getBlock:"bloco %m.blockData na pos x:%n y:%n z:%n %m.blockPos", 
+            whenBlockHit: "quando bloco atingido",
+            message:"mensagem"
+        },
+        de: {
+            postToChat: 'Zeige Nachricht %s',
+            playerPosToChat: "Zeige Spieler-Position als Nachricht",
+            setPlayerPos: "Stelle Spieler auf x:%n y:%n z:%n",
+            setBlock: "Stelle Block auf x:%n y:%n z:%n Block %n Status %n %m.blockPos",
+            setBlocks: "Setze Bloecke von x1:%n y1:%n z1:%n bis x2:%n y2:%n z2:%n Block %n data %n",
+            setLine: "Linie von x1:%n z1:%n bis x2:%n z2:%n Hoehe y:%n mit Block %n Status %n",
+            setCircle: "Kreis mit Mittelpunkt x1:%n z1:%n Radius r:%n Hoehe y:%n Block %n Status %n",
+            getPlayerPos:"Spieler-Position %m.pos",
+            getBlock:"Block %m.blockData fuer x:%n y:%n z:%n %m.blockPos",
+            whenBlockHit: "Wenn Block berührt",
+            message:"Nachricht"
+        },
+    }
+
+    function getTranslationForLang( lang ){
+        switch (lang){
+          case "pt":
+          case "pt-PT":
+          case "pt-BR":
+            return TRANSLATIONS.pt;
+          case "de":
+          case "de-DE":
+          case "de-AT":
+          case "de-CH":
+          case "de-LI":
+          case "de-LU":
+            return TRANSLATIONS.de;
+          default:
+            return TRANSLATIONS.en;
+            
+        }
+    }
+
+    // how which language translation is chosen (increasing priority):
+    //   1 - explicit 'lang' parameter in the url (e.g: http://scratchx.org/?url=https://paulolc.neocities.org/mcpi-scratch/mcpi-scratch.js&lang=pt#scratch)
+    //   2 - browser first preferred language (navigator.languages[0])
+    //   3 - default (english)
+
+    var urlParams = new URLSearchParams(window.location.search);
+    var lang = urlParams.get('lang') || navigator.languages[0];
+    var translate = getTranslationForLang(lang);
 
     // Block and block menu descriptions
     var descriptor = {
         blocks: [
-            ['', 'post to chat %s', 'postToChat', 'message'],
-            [" ", "post Player.pos chat", "playerPosToChat"],
-            [" ", "set Player pos to x:%n y:%n z:%n", "setPlayerPos", 0, 0, 0],
-            [" ", "set block pos x:%n y:%n z:%n to type %n data %n %m.blockPos", "setBlock", 0, 0, 0, 1, -1],
-            [" ", "set blocks pos x1:%n y1:%n z1:%n to x2:%n y2:%n z2:%n to type %n data %n", "setBlocks", 0, 0, 0, 0, 0, 0, 1, -1],
-            [" ", "set line pos x1:%n z1:%n to x2:%n z2:%n height y:%n to type %n data %n", "setLine", 0, 0, 0, 0, 0, 1, -1],
-            [" ", "set circle center x1:%n z1:%n radius r:%n at height y:%n to type %n data %n", "setCircle", 0, 0, 0, 0, 0, 1, -1],
+            ['',  translate.postToChat, "postToChat",  translate.message],
+            [" ", translate.playerPosToChat,"playerPosToChat"],
+            [" ", translate.setPlayerPos,"setPlayerPos", 0, 0, 0],
+            [" ", translate.setBlock,"setBlock", 0, 0, 0, 1, -1],
+            [" ", translate.setBlocks,"setBlocks", 0, 0, 0, 0, 0, 0, 1, -1],
+            [" ", translate.setLine,"setLine", 0, 0, 0, 0, 0, 1, -1],
+            [" ", translate.setCircle,"setCircle", 0, 0, 0, 0, 0, 1, -1],
+            ["R", translate.getPlayerPos,"getPlayerPos", 'x'],
+            ["R", translate.getBlock,"getBlock", '', 0, 0, 0],
+            ["h", translate.whenBlockHit,'whenBlockHit'],
         ],
         menus: {
             pos: ['x', 'y', 'z'],
-            blockPos: ['abs', 'rel']
+            blockPos: ['abs', 'rel'],
+            blockData: ['id', 'data']
         }
     };
 
     // Register the extension
     ScratchExtensions.register('MCPI-Scratch', descriptor, ext);
+
+    checkMC_Events();
+    var poller = setInterval(checkMC_Events, 2000);
 
 })({});

@@ -8,6 +8,9 @@ import urlparse
 import mcpi.minecraft as minecraft
 import mcpi.block as block
 import logging
+import time
+
+MCPI_CONNECT_TIMEOUT=5
 
 logging.basicConfig(level=logging.DEBUG)
 #logging.basicConfig(level=logging.INFO)
@@ -23,8 +26,8 @@ class GetHandler(BaseHTTPRequestHandler):
         blockType = int(params[3])
         blockData = int(params[4])
         if (params[5] == 'rel'): # set the block relative to the player
-            playerPos = mc.player.getPos()
-            playerPos = minecraft.Vec3(int(playerPos.x), int(playerPos.y), int(playerPos.z))
+            playerPos = mc.player.getTilePos()
+            #playerPos = minecraft.Vec3(int(playerPos.x), int(playerPos.y), int(playerPos.z))
             x += playerPos.x
             y += playerPos.y
             z += playerPos.z
@@ -166,9 +169,9 @@ class GetHandler(BaseHTTPRequestHandler):
 
     def playerPosToChat(self, params):
         log.info('playerPos to chat')
-        playerPos = mc.player.getPos()
+        playerPos = mc.player.getTilePos()
         log.debug(playerPos)
-        playerPos = minecraft.Vec3(int(playerPos.x), int(playerPos.y), int(playerPos.z))
+        #playerPos = minecraft.Vec3(int(playerPos.x), int(playerPos.y), int(playerPos.z))
         log.debug(playerPos)
         posStr = ("x {0} y {1} z {2}".format(str(playerPos.x), str(playerPos.y), str(playerPos.z)))
         log.debug(posStr)
@@ -184,6 +187,56 @@ class GetHandler(BaseHTTPRequestHandler):
         log.info('trying to reset')
         return ''
 
+    def getPlayerPos(self, params): # doesn't support metadata
+        log.info('invoke getPlayerPos: {}'.format(params[0]))
+        playerPos = mc.player.getTilePos()
+        #Using your players position
+        # - the players position is an x,y,z coordinate of floats (e.g. 23.59,12.00,-45.32)
+        # - in order to use the players position in other commands we need integers (e.g. 23,12,-45)
+        # - so we use getTilePos() which returns the integers
+        log.debug(playerPos)
+        # I'm sure theres a more pythony way to get at the vector elements but...
+        coord = params[0];
+        coordVal = 0;
+        if (coord == 'x'):
+            coordVal = playerPos.x
+        if (coord == 'y'):
+            coordVal = playerPos.y
+        if (coord == 'z'):
+            coordVal = playerPos.z
+        return str(coordVal)
+
+    # getBlock calls getBlockWithData function
+    def getBlock(self, params):
+        log.info ('getBlock: {0}'.format(params))
+        x = int(params[1])
+        y = int(params[2])
+        z = int(params[3])
+        if (params[4] == 'rel'): # set the block relative to the player
+            playerPos = mc.player.getTilePos()
+            x += playerPos.x
+            y += playerPos.y
+            z += playerPos.z
+        blockData = mc.getBlockWithData(x, y, z)
+        log.info ('blockData: %s', blockData)
+        if params[0] == 'data':
+            return str(blockData.data)
+        else:
+            return str(blockData.id)
+
+    # pollBlockHits calls pollBlockHits function
+    # currently only returns the first block in the period between polls
+    # requires that polling is enabled to check  
+    # TODO: refactor to return multiple blocks
+    def pollBlockHits(self, params):
+        log.info ('pollBlockHits: {0}'.format(params))
+        blockHits = mc.events.pollBlockHits()
+        log.info ('blockHits: %s', blockHits)
+        if blockHits:
+            return str(1)
+        return str(0)
+
+    # from original version for scratch2
     # currently unused
     def pollEvents(self, params):
         global pollInc, pollLimit, prevPosStr
@@ -200,9 +253,10 @@ class GetHandler(BaseHTTPRequestHandler):
         # - so round the players position
         # - the Vec3 object is part of the minecraft class library
         playerPos = minecraft.Vec3(int(playerPos.x), int(playerPos.y), int(playerPos.z))
-        posStr = ("playerPos/x {0}\r\nplayerPos/y {1}\r\nplayerPos/z {2}".format(str(playerPos.x), str(playerPos.y), str(playerPos.z)))
-        prevPosStr = posStr
-        return posStr
+        # posStr = ("playerPos/x {0}\r\nplayerPos/y {1}\r\nplayerPos/z {2}".format(str(playerPos.x), str(playerPos.y), str(playerPos.z)))
+        # posStr = ("{0}".format(str(playerPos.x)))
+        log.debug(playerPos)
+        return playerPos.x
 
     def do_OPTIONS(self):
         self.send_response(200, "ok")
@@ -226,6 +280,9 @@ class GetHandler(BaseHTTPRequestHandler):
             "setCircle" : self.setCircle,
             "cross_domain.xml" : self.cross_domain,
             "reset_all" : self.reset_all,
+            "getPlayerPos" : self.getPlayerPos,
+            "getBlock" : self.getBlock,
+            "pollBlockHit" : self.pollBlockHits,
         }
         parsed_path = urlparse.urlparse(self.path)
         message_parts = []
@@ -260,16 +317,16 @@ if __name__ == '__main__':
     pollLimit = 15
     prevPosStr = ""
 
-    try:
-        if args.host:
-            mc = minecraft.Minecraft.create(args.host)
-        else:
-            mc = minecraft.Minecraft.create()
-    except:
-        e = sys.exc_info()[0]
-        log.exception('cannot connect to minecraft')
-        traceback.print_exc(file=sys.stdout)
-        sys.exit(0)
+
+    host = args.host or "localhost"
+    connected = False
+    while (not connected):
+        try:
+            mc = minecraft.Minecraft.create(host)
+            connected = True
+        except:
+            print("Timed out connecting to a Minecraft MCPI server (" + host + ":4711). Retrying in "+ str(MCPI_CONNECT_TIMEOUT) +" secs ... Press CTRL-C to exit.")
+            time.sleep( MCPI_CONNECT_TIMEOUT )
 
     from BaseHTTPServer import HTTPServer
     server = HTTPServer(('localhost', 4715), GetHandler)
